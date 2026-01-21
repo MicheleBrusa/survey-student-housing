@@ -1,0 +1,1122 @@
+'use client';
+
+import React, { useMemo, useState, useEffect } from 'react';
+
+/**
+ * Versione “semplice” e autosufficiente della survey:
+ * - niente shadcn/ui
+ * - niente framer-motion
+ * - niente lucide-react
+ * Così funziona subito su StackBlitz e poi la pubblichiamo su Vercel.
+ */
+
+const PRICING = {
+  typologies: {
+    a: {
+      rent: 570,
+      accessories: 120,
+      commonAreas: 40,
+      cleaning: { weekly: 120, twiceMonth: 60, monthly: 30, none: 0 },
+    },
+    b: {
+      rent: 485,
+      accessories: 110,
+      commonAreas: 40,
+      cleaning: { weekly: 80, twiceMonth: 40, monthly: 20, none: 0 },
+    },
+    c: {
+      rent: 615,
+      accessories: 120,
+      commonAreas: 40,
+      cleaning: { weekly: 120, twiceMonth: 60, monthly: 30, none: 0 },
+    },
+    d: {
+      rent: 535,
+      accessories: 110,
+      commonAreas: 40,
+      cleaning: { weekly: 80, twiceMonth: 40, monthly: 20, none: 0 },
+    },
+    e: {
+      rent: 570,
+      accessories: 120,
+      commonAreas: 40,
+      cleaning: { weekly: 120, twiceMonth: 60, monthly: 30, none: 0 },
+    },
+    f: {
+      rent: 430,
+      accessories: 110,
+      commonAreas: 40,
+      cleaning: { weekly: 80, twiceMonth: 40, monthly: 20, none: 0 },
+    },
+  },
+};
+
+const FLOORPLANS = {
+  apartmentAll: '/plans/apartment-all.png',
+  a: '/plans/a.png',
+  b: '/plans/b.png',
+  c: '/plans/c.png',
+  d: '/plans/d.png',
+  e: '/plans/e.png',
+  f: '/plans/f.png',
+};
+
+const OPTIONS = {
+  category: [
+    {
+      id: 'apartment',
+      title: 'Soluzioni ad appartamento',
+      desc: 'Cucina/soggiorno condivisi, camere con bagno.',
+      plan: FLOORPLANS.apartmentAll,
+    },
+    {
+      id: 'kitchenette',
+      title: 'Camere con angolo cottura',
+      desc: 'Stanza con angolo cottura + bagno.',
+      plan: null,
+    },
+  ],
+  typology: [
+    {
+      id: 'a',
+      category: 'apartment',
+      title: '(a) Singola standard con bagno',
+      desc: 'Camera singola standard, bagno privato.',
+      plan: FLOORPLANS.a,
+    },
+    {
+      id: 'b',
+      category: 'apartment',
+      title: '(b) Doppia standard con bagno',
+      desc: 'Camera doppia standard, bagno privato.',
+      plan: FLOORPLANS.b,
+    },
+    {
+      id: 'c',
+      category: 'apartment',
+      title: '(c) Singola grande con bagno',
+      desc: 'Camera singola più ampia, bagno privato.',
+      plan: FLOORPLANS.c,
+    },
+    {
+      id: 'd',
+      category: 'apartment',
+      title: '(d) Doppia grande con bagno',
+      desc: 'Camera doppia più ampia, bagno privato.',
+      plan: FLOORPLANS.d,
+    },
+    {
+      id: 'e',
+      category: 'kitchenette',
+      title: '(e) Singola con bagno e angolo cottura',
+      desc: 'Singola + bagno + kitchenette.',
+      plan: FLOORPLANS.e,
+    },
+    {
+      id: 'f',
+      category: 'kitchenette',
+      title: '(f) Doppia con bagno e angolo cottura',
+      desc: 'Doppia + bagno + kitchenette.',
+      plan: FLOORPLANS.f,
+    },
+  ],
+  cleaning: [
+    { id: 'none', title: 'Nessun servizio pulizie', desc: 'Non lo voglio' },
+    { id: 'monthly', title: 'Pulizie mensili', desc: '1 volta al mese' },
+    {
+      id: 'twiceMonth',
+      title: 'Pulizie 2 volte al mese',
+      desc: 'Ogni ~2 settimane',
+    },
+    { id: 'weekly', title: 'Pulizie settimanali', desc: 'Ogni settimana' },
+  ],
+};
+
+function eur(n: number) {
+  try {
+    return new Intl.NumberFormat('it-IT', {
+      style: 'currency',
+      currency: 'EUR',
+      maximumFractionDigits: 0,
+    }).format(n);
+  } catch {
+    return `${Math.round(n)} €`;
+  }
+}
+
+function computePrice(state: any) {
+  const p =
+    PRICING.typologies[state.typology as keyof typeof PRICING.typologies];
+  if (!p)
+    return {
+      breakdown: { rent: 0, accessories: 0, cleaning: 0, commonAreas: 0 },
+      totalMonthly: 0,
+      isComplete: false,
+    };
+
+  const rent = state.priceFlags.typologyChosen ? p.rent : 0;
+  const accessories =
+    state.priceFlags.accessoriesDecided && state.includeAccessories
+      ? p.accessories
+      : 0;
+  const cleaning = state.priceFlags.cleaningDecided
+    ? p.cleaning?.[state.cleaning] ?? 0
+    : 0;
+  const commonAreas =
+    state.priceFlags.commonAreasDecided && state.includeCommonAreas
+      ? p.commonAreas
+      : 0;
+
+  const breakdown = { rent, accessories, cleaning, commonAreas };
+  const totalMonthly = Object.values(breakdown).reduce(
+    (a: number, b: any) => a + (b as number),
+    0
+  );
+
+  const isComplete =
+    state.priceFlags.typologyChosen &&
+    state.priceFlags.accessoriesDecided &&
+    state.priceFlags.cleaningDecided &&
+    state.priceFlags.commonAreasDecided;
+
+  return { breakdown, totalMonthly, isComplete };
+}
+
+const steps = [
+  { key: 'intro', title: 'Start' },
+  { key: 'category', title: 'Categoria' },
+  { key: 'typology', title: 'Tipologia' },
+  { key: 'accessories', title: 'Spese' },
+  { key: 'cleaning', title: 'Pulizie' },
+  { key: 'common', title: 'Spazi' },
+  { key: 'profile', title: 'Profilo' },
+  { key: 'review', title: 'Conferma' },
+  { key: 'thanks', title: 'Fine' },
+];
+
+function Box({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        border: '1px solid #e5e7eb',
+        borderRadius: 16,
+        padding: 16,
+        background: 'white',
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function Btn({ children, onClick, disabled, secondary }: any) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        width: '100%',
+        borderRadius: 14,
+        padding: '12px 14px',
+        border: '1px solid #e5e7eb',
+        background: disabled ? '#f3f4f6' : secondary ? '#f3f4f6' : 'black',
+        color: disabled ? '#9ca3af' : secondary ? 'black' : 'white',
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        fontWeight: 600,
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function Small({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{ fontSize: 12, color: '#6b7280', lineHeight: 1.4 }}>
+      {children}
+    </div>
+  );
+}
+
+function Row({ label, value, dashed }: any) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        gap: 12,
+        fontSize: 14,
+      }}
+    >
+      <div style={{ color: '#374151' }}>{label}</div>
+      <div
+        style={{
+          color: dashed ? '#9ca3af' : '#111827',
+          fontVariantNumeric: 'tabular-nums',
+        }}
+      >
+        {dashed ? '—' : eur(value)}
+      </div>
+    </div>
+  );
+}
+
+function PlanThumb({ src, title }: { src: string | null; title: string }) {
+  const [open, setOpen] = useState(false);
+  if (!src) return null;
+
+  return (
+    <div style={{ marginTop: 10 }}>
+      <button
+        onClick={() => setOpen(true)}
+        style={{
+          width: '100%',
+          borderRadius: 16,
+          border: '1px solid #e5e7eb',
+          overflow: 'hidden',
+          background: '#f9fafb',
+          cursor: 'pointer',
+        }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            padding: 10,
+            fontSize: 12,
+            color: '#6b7280',
+          }}
+        >
+          <span>Piantina</span>
+          <span style={{ fontWeight: 700 }}>Zoom</span>
+        </div>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={src}
+          alt={title}
+          style={{
+            width: '100%',
+            height: 180,
+            objectFit: 'cover',
+            display: 'block',
+          }}
+        />
+      </button>
+
+      {open ? (
+        <div
+          onClick={() => setOpen(false)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.55)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 16,
+            zIndex: 50,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: 'min(980px, 100%)',
+              background: 'white',
+              borderRadius: 16,
+              overflow: 'hidden',
+              border: '1px solid #e5e7eb',
+            }}
+          >
+            <div
+              style={{
+                padding: 12,
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+              }}
+            >
+              <div style={{ fontWeight: 700 }}>{title}</div>
+              <button
+                onClick={() => setOpen(false)}
+                style={{
+                  border: '1px solid #e5e7eb',
+                  borderRadius: 12,
+                  padding: '6px 10px',
+                  cursor: 'pointer',
+                }}
+              >
+                Chiudi
+              </button>
+            </div>
+            <div style={{ borderTop: '1px solid #e5e7eb' }}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={src}
+                alt={title}
+                style={{ width: '100%', height: 'auto', display: 'block' }}
+              />
+            </div>
+            <div style={{ padding: 10, fontSize: 12, color: '#6b7280' }}>
+              Se l’immagine non compare: dovrai aggiungere i file nella cartella{' '}
+              <b>public/plans</b>.
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+export default function Page() {
+  const [stepIdx, setStepIdx] = useState(0);
+
+  const [state, setState] = useState<any>({
+    category: 'apartment',
+    typology: 'a',
+    includeAccessories: false,
+    includeCommonAreas: false,
+    cleaning: 'none',
+    priceFlags: {
+      typologyChosen: false,
+      accessoriesDecided: false,
+      cleaningDecided: false,
+      commonAreasDecided: false,
+    },
+    age: '',
+    nationality: '',
+    university: '',
+    budgetCap: '',
+    notes: '',
+    consent: false,
+  });
+
+  const filteredTypologies = useMemo(
+    () => OPTIONS.typology.filter((t) => t.category === state.category),
+    [state.category]
+  );
+  const price = useMemo(() => computePrice(state), [state]);
+
+  const currentKey = steps[stepIdx]?.key;
+  const progress = Math.round(((stepIdx + 1) / steps.length) * 100);
+
+  const next = () => setStepIdx((i) => Math.min(steps.length - 1, i + 1));
+  const prev = () => setStepIdx((i) => Math.max(0, i - 1));
+
+  // Auto-fix tipologia quando cambia categoria
+  useEffect(() => {
+    if (!filteredTypologies.some((t) => t.id === state.typology)) {
+      setState((s: any) => ({
+        ...s,
+        typology: filteredTypologies[0]?.id ?? 'a',
+      }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.category]);
+
+  // Per evitare “scelte non registrate” se uno va avanti senza toccare nulla,
+  // segniamo la decisione come presa quando entri nello step.
+  useEffect(() => {
+    if (currentKey === 'accessories' && !state.priceFlags.accessoriesDecided) {
+      setState((s: any) => ({
+        ...s,
+        priceFlags: { ...s.priceFlags, accessoriesDecided: true },
+      }));
+    }
+    if (currentKey === 'cleaning' && !state.priceFlags.cleaningDecided) {
+      setState((s: any) => ({
+        ...s,
+        priceFlags: { ...s.priceFlags, cleaningDecided: true },
+      }));
+    }
+    if (currentKey === 'common' && !state.priceFlags.commonAreasDecided) {
+      setState((s: any) => ({
+        ...s,
+        priceFlags: { ...s.priceFlags, commonAreasDecided: true },
+      }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentKey]);
+
+  const typ = OPTIONS.typology.find((t) => t.id === state.typology);
+  const cat = OPTIONS.category.find((c) => c.id === state.category);
+
+  async function submit() {
+    const payload = {
+      submittedAt: new Date().toISOString(),
+      answers: {
+        category: state.category,
+        typology: state.typology,
+        includeAccessories: state.includeAccessories,
+        cleaning: state.cleaning,
+        includeCommonAreas: state.includeCommonAreas,
+        priceMonthly: price.totalMonthly,
+        breakdown: price.breakdown,
+        priceComplete: price.isComplete,
+        profile: {
+          age: state.age,
+          nationality: state.nationality,
+          university: state.university,
+          budgetCap: state.budgetCap,
+          notes: state.notes,
+        },
+        consent: state.consent,
+      },
+    };
+
+    // Salvataggio locale (per test)
+    try {
+      const key = 'survey_student_housing_responses';
+      const existing = JSON.parse(localStorage.getItem(key) || '[]');
+      existing.push(payload);
+      localStorage.setItem(key, JSON.stringify(existing));
+      alert('Risposta salvata (per ora) nel browser. Pubblicazione ok!');
+    } catch {
+      alert('Salvato (ma il browser ha bloccato localStorage).');
+    }
+
+    next();
+  }
+
+  return (
+    <div style={{ minHeight: '100vh', background: '#f9fafb', padding: 16 }}>
+      <div
+        style={{
+          maxWidth: 980,
+          margin: '0 auto',
+          display: 'grid',
+          gridTemplateColumns: '1fr',
+          gap: 12,
+        }}
+      >
+        <Box>
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              gap: 12,
+            }}
+          >
+            <div>
+              <div style={{ fontSize: 12, color: '#6b7280' }}>Tariffa</div>
+              <div style={{ fontSize: 22, fontWeight: 800 }}>
+                {price.isComplete
+                  ? `${eur(price.totalMonthly)} / mese`
+                  : 'In composizione…'}
+              </div>
+              <Small>
+                {cat?.title} • {typ?.title}
+              </Small>
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <Small>
+                Step {Math.min(stepIdx + 1, steps.length)} / {steps.length}
+              </Small>
+              <div style={{ marginTop: 6, fontWeight: 800 }}>{progress}%</div>
+            </div>
+          </div>
+          <div
+            style={{
+              marginTop: 12,
+              height: 8,
+              background: '#e5e7eb',
+              borderRadius: 999,
+            }}
+          >
+            <div
+              style={{
+                width: `${progress}%`,
+                height: '100%',
+                background: 'black',
+                borderRadius: 999,
+              }}
+            />
+          </div>
+        </Box>
+
+        <Box>
+          {currentKey === 'intro' ? (
+            <>
+              <div style={{ fontSize: 22, fontWeight: 800 }}>
+                Configura la tua soluzione ideale
+              </div>
+              <Small>
+                Il prezzo si costruisce man mano: tipologia → spese → pulizie →
+                spazi comuni.
+              </Small>
+              <div style={{ marginTop: 12 }}>
+                <Btn onClick={next}>Inizia</Btn>
+              </div>
+            </>
+          ) : null}
+
+          {currentKey === 'category' ? (
+            <>
+              <div style={{ fontSize: 18, fontWeight: 800 }}>
+                Scegli la categoria
+              </div>
+              <Small>
+                Tutte le disponibilità sono in strutture a studentato.
+              </Small>
+
+              <div style={{ marginTop: 12, display: 'grid', gap: 10 }}>
+                {OPTIONS.category.map((o) => (
+                  <button
+                    key={o.id}
+                    onClick={() =>
+                      setState((s: any) => ({ ...s, category: o.id }))
+                    }
+                    style={{
+                      textAlign: 'left',
+                      borderRadius: 16,
+                      border: '1px solid #e5e7eb',
+                      padding: 14,
+                      background: state.category === o.id ? '#eef2ff' : 'white',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <div style={{ fontWeight: 800 }}>{o.title}</div>
+                    <Small>{o.desc}</Small>
+                    <PlanThumb src={o.plan} title={`Piantina — ${o.title}`} />
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : null}
+
+          {currentKey === 'typology' ? (
+            <>
+              <div style={{ fontSize: 18, fontWeight: 800 }}>
+                Scegli la tipologia
+              </div>
+              <Small>Seleziona la camera che ti interessa (a–f).</Small>
+
+              <div style={{ marginTop: 12, display: 'grid', gap: 10 }}>
+                {filteredTypologies.map((o) => (
+                  <button
+                    key={o.id}
+                    onClick={() =>
+                      setState((s: any) => ({
+                        ...s,
+                        typology: o.id,
+                        priceFlags: { ...s.priceFlags, typologyChosen: true },
+                      }))
+                    }
+                    style={{
+                      textAlign: 'left',
+                      borderRadius: 16,
+                      border: '1px solid #e5e7eb',
+                      padding: 14,
+                      background: state.typology === o.id ? '#ecfeff' : 'white',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        gap: 10,
+                      }}
+                    >
+                      <div style={{ fontWeight: 800 }}>{o.title}</div>
+                      <div style={{ fontWeight: 800, whiteSpace: 'nowrap' }}>
+                        {eur(PRICING.typologies[o.id as any]?.rent ?? 0)}
+                      </div>
+                    </div>
+                    <Small>{o.desc}</Small>
+                    <PlanThumb src={o.plan} title={`Piantina — ${o.title}`} />
+                  </button>
+                ))}
+              </div>
+              <div style={{ marginTop: 10 }}>
+                <Small>
+                  Dopo questa scelta, il calcolatore mostra la quota affitto.
+                </Small>
+              </div>
+            </>
+          ) : null}
+
+          {currentKey === 'accessories' ? (
+            <>
+              <div style={{ fontSize: 18, fontWeight: 800 }}>
+                Spese accessorie
+              </div>
+              <Small>
+                Vuoi includere le spese accessorie nella tua soluzione?
+              </Small>
+
+              <div
+                style={{
+                  marginTop: 12,
+                  border: '1px solid #e5e7eb',
+                  borderRadius: 16,
+                  padding: 14,
+                }}
+              >
+                <div style={{ fontWeight: 800 }}>Includi spese accessorie</div>
+                <Small>Utenze/servizi accessori (come da tariffario).</Small>
+                <div style={{ marginTop: 8, fontWeight: 800 }}>
+                  + {eur(PRICING.typologies[state.typology]?.accessories ?? 0)}{' '}
+                  / mese
+                </div>
+
+                <div style={{ marginTop: 12, display: 'flex', gap: 10 }}>
+                  <Btn
+                    secondary
+                    onClick={() =>
+                      setState((s: any) => ({
+                        ...s,
+                        includeAccessories: false,
+                      }))
+                    }
+                  >
+                    No
+                  </Btn>
+                  <Btn
+                    onClick={() =>
+                      setState((s: any) => ({ ...s, includeAccessories: true }))
+                    }
+                  >
+                    Sì
+                  </Btn>
+                </div>
+              </div>
+            </>
+          ) : null}
+
+          {currentKey === 'cleaning' ? (
+            <>
+              <div style={{ fontSize: 18, fontWeight: 800 }}>Pulizie</div>
+              <Small>
+                Seleziona il livello di servizio (puoi anche non volerlo).
+              </Small>
+
+              <div style={{ marginTop: 12, display: 'grid', gap: 10 }}>
+                {OPTIONS.cleaning.map((o) => (
+                  <button
+                    key={o.id}
+                    onClick={() =>
+                      setState((s: any) => ({ ...s, cleaning: o.id }))
+                    }
+                    style={{
+                      textAlign: 'left',
+                      borderRadius: 16,
+                      border: '1px solid #e5e7eb',
+                      padding: 14,
+                      background: state.cleaning === o.id ? '#f0fdf4' : 'white',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        gap: 10,
+                      }}
+                    >
+                      <div style={{ fontWeight: 800 }}>{o.title}</div>
+                      <div style={{ fontWeight: 800 }}>
+                        {eur(
+                          PRICING.typologies[state.typology]?.cleaning?.[
+                            o.id
+                          ] ?? 0
+                        )}
+                      </div>
+                    </div>
+                    <Small>{o.desc}</Small>
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : null}
+
+          {currentKey === 'common' ? (
+            <>
+              <div style={{ fontSize: 18, fontWeight: 800 }}>Spazi comuni</div>
+              <Small>Vuoi includere l’accesso agli spazi comuni?</Small>
+
+              <div
+                style={{
+                  marginTop: 12,
+                  border: '1px solid #e5e7eb',
+                  borderRadius: 16,
+                  padding: 14,
+                }}
+              >
+                <div style={{ fontWeight: 800 }}>Accesso spazi comuni</div>
+                <Small>Aule studio, biblioteca, sala cinema, palestra.</Small>
+                <div style={{ marginTop: 8, fontWeight: 800 }}>
+                  + {eur(PRICING.typologies[state.typology]?.commonAreas ?? 0)}{' '}
+                  / mese
+                </div>
+
+                <div style={{ marginTop: 12, display: 'flex', gap: 10 }}>
+                  <Btn
+                    secondary
+                    onClick={() =>
+                      setState((s: any) => ({
+                        ...s,
+                        includeCommonAreas: false,
+                      }))
+                    }
+                  >
+                    No
+                  </Btn>
+                  <Btn
+                    onClick={() =>
+                      setState((s: any) => ({ ...s, includeCommonAreas: true }))
+                    }
+                  >
+                    Sì
+                  </Btn>
+                </div>
+              </div>
+            </>
+          ) : null}
+
+          {currentKey === 'profile' ? (
+            <>
+              <div style={{ fontSize: 18, fontWeight: 800 }}>
+                Mini profilo (facoltativo)
+              </div>
+              <Small>Ci aiuta ad interpretare meglio le preferenze.</Small>
+
+              <div style={{ marginTop: 12, display: 'grid', gap: 10 }}>
+                <input
+                  placeholder="Età (opzionale)"
+                  value={state.age}
+                  onChange={(e) =>
+                    setState((s: any) => ({ ...s, age: e.target.value }))
+                  }
+                  style={inpStyle}
+                />
+                <input
+                  placeholder="Nazionalità (opzionale)"
+                  value={state.nationality}
+                  onChange={(e) =>
+                    setState((s: any) => ({
+                      ...s,
+                      nationality: e.target.value,
+                    }))
+                  }
+                  style={inpStyle}
+                />
+                <input
+                  placeholder="Università / corso (opzionale)"
+                  value={state.university}
+                  onChange={(e) =>
+                    setState((s: any) => ({ ...s, university: e.target.value }))
+                  }
+                  style={inpStyle}
+                />
+                <input
+                  placeholder="Budget massimo mensile (opzionale)"
+                  value={state.budgetCap}
+                  onChange={(e) =>
+                    setState((s: any) => ({ ...s, budgetCap: e.target.value }))
+                  }
+                  style={inpStyle}
+                />
+                <textarea
+                  placeholder="Note (opzionale)"
+                  value={state.notes}
+                  onChange={(e) =>
+                    setState((s: any) => ({ ...s, notes: e.target.value }))
+                  }
+                  style={{ ...inpStyle, minHeight: 90 }}
+                />
+              </div>
+            </>
+          ) : null}
+
+          {currentKey === 'review' ? (
+            <>
+              <div style={{ fontSize: 18, fontWeight: 800 }}>Conferma</div>
+              <Small>
+                Controlla e conferma: questa è la configurazione che prenderesti
+                davvero.
+              </Small>
+
+              <div
+                style={{
+                  marginTop: 12,
+                  border: '1px solid #e5e7eb',
+                  borderRadius: 16,
+                  padding: 14,
+                }}
+              >
+                <Small>Composizione</Small>
+                <div style={{ marginTop: 10, display: 'grid', gap: 8 }}>
+                  <Row
+                    label="Quota affitto"
+                    value={price.breakdown.rent}
+                    dashed={!state.priceFlags.typologyChosen}
+                  />
+                  <Row
+                    label={
+                      state.includeAccessories
+                        ? 'Spese accessorie'
+                        : 'Spese accessorie (no)'
+                    }
+                    value={price.breakdown.accessories}
+                    dashed={!state.priceFlags.accessoriesDecided}
+                  />
+                  <Row
+                    label={
+                      state.cleaning === 'none' ? 'Pulizie (no)' : 'Pulizie'
+                    }
+                    value={price.breakdown.cleaning}
+                    dashed={!state.priceFlags.cleaningDecided}
+                  />
+                  <Row
+                    label={
+                      state.includeCommonAreas
+                        ? 'Spazi comuni'
+                        : 'Spazi comuni (no)'
+                    }
+                    value={price.breakdown.commonAreas}
+                    dashed={!state.priceFlags.commonAreasDecided}
+                  />
+                </div>
+
+                <div
+                  style={{ height: 1, background: '#e5e7eb', margin: '12px 0' }}
+                />
+
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    fontWeight: 900,
+                  }}
+                >
+                  <div>Totale / mese</div>
+                  <div>{eur(price.totalMonthly)}</div>
+                </div>
+              </div>
+
+              <div
+                style={{
+                  marginTop: 12,
+                  border: '1px solid #e5e7eb',
+                  borderRadius: 16,
+                  padding: 14,
+                }}
+              >
+                <div style={{ fontWeight: 800 }}>Consenso privacy</div>
+                <Small>
+                  Accetto che le risposte siano usate in forma aggregata per
+                  analisi e progettazione dell’offerta.
+                </Small>
+
+                <label
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    marginTop: 10,
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={state.consent}
+                    onChange={(e) =>
+                      setState((s: any) => ({
+                        ...s,
+                        consent: e.target.checked,
+                      }))
+                    }
+                  />
+                  <span>Accetto</span>
+                </label>
+              </div>
+
+              <div style={{ marginTop: 12 }}>
+                <Btn disabled={!state.consent} onClick={submit}>
+                  Invia risposte
+                </Btn>
+              </div>
+
+              <div style={{ marginTop: 8 }}>
+                <Small>
+                  Per ora salva nel browser (test). Dopo mettiamo la raccolta
+                  centralizzata.
+                </Small>
+              </div>
+            </>
+          ) : null}
+
+          {currentKey === 'thanks' ? (
+            <>
+              <div style={{ fontSize: 18, fontWeight: 800 }}>Grazie!</div>
+              <Small>Risposta registrata. Puoi chiudere la pagina.</Small>
+              <div style={{ marginTop: 12, fontSize: 22, fontWeight: 900 }}>
+                {eur(price.totalMonthly)} / mese
+              </div>
+              <div style={{ marginTop: 12 }}>
+                <Btn secondary onClick={() => setStepIdx(0)}>
+                  Compila di nuovo
+                </Btn>
+              </div>
+            </>
+          ) : null}
+        </Box>
+
+        {/* Barra “indietro / avanti” */}
+        <Box>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button
+              onClick={prev}
+              disabled={stepIdx === 0}
+              style={{
+                flex: 1,
+                borderRadius: 14,
+                padding: '10px 12px',
+                border: '1px solid #e5e7eb',
+                background: stepIdx === 0 ? '#f3f4f6' : 'white',
+                cursor: stepIdx === 0 ? 'not-allowed' : 'pointer',
+                fontWeight: 700,
+              }}
+            >
+              Indietro
+            </button>
+
+            <button
+              onClick={next}
+              disabled={currentKey === 'review' || currentKey === 'thanks'}
+              style={{
+                flex: 1,
+                borderRadius: 14,
+                padding: '10px 12px',
+                border: '1px solid #e5e7eb',
+                background:
+                  currentKey === 'review' || currentKey === 'thanks'
+                    ? '#f3f4f6'
+                    : 'black',
+                color:
+                  currentKey === 'review' || currentKey === 'thanks'
+                    ? '#9ca3af'
+                    : 'white',
+                cursor:
+                  currentKey === 'review' || currentKey === 'thanks'
+                    ? 'not-allowed'
+                    : 'pointer',
+                fontWeight: 700,
+              }}
+            >
+              Avanti
+            </button>
+          </div>
+        </Box>
+
+        {/* Calcolatore prezzo sempre visibile */}
+        <Box>
+          <div style={{ fontWeight: 900, fontSize: 16 }}>
+            Calcolatore tariffa
+          </div>
+          <Small>Il prezzo si compone man mano che scegli.</Small>
+
+          <div
+            style={{
+              marginTop: 12,
+              border: '1px solid #e5e7eb',
+              borderRadius: 16,
+              padding: 14,
+            }}
+          >
+            <Small>Configurazione</Small>
+            <div style={{ marginTop: 4, fontWeight: 800 }}>
+              {cat?.title} • {typ?.title}
+            </div>
+            <div style={{ marginTop: 6 }}>
+              <Small>
+                Totale completo: {price.isComplete ? 'sì' : 'non ancora'}
+              </Small>
+            </div>
+          </div>
+
+          <div
+            style={{
+              marginTop: 12,
+              border: '1px solid #e5e7eb',
+              borderRadius: 16,
+              padding: 14,
+              display: 'grid',
+              gap: 8,
+            }}
+          >
+            <Row
+              label="Quota affitto"
+              value={price.breakdown.rent}
+              dashed={!state.priceFlags.typologyChosen}
+            />
+            <Row
+              label={
+                state.includeAccessories
+                  ? 'Quota spese accessorie'
+                  : 'Spese accessorie (non incluse)'
+              }
+              value={price.breakdown.accessories}
+              dashed={!state.priceFlags.accessoriesDecided}
+            />
+            <Row
+              label={
+                state.cleaning === 'none'
+                  ? 'Pulizie (nessun servizio)'
+                  : 'Quota pulizie'
+              }
+              value={price.breakdown.cleaning}
+              dashed={!state.priceFlags.cleaningDecided}
+            />
+            <Row
+              label={
+                state.includeCommonAreas
+                  ? 'Quota spazi comuni'
+                  : 'Spazi comuni (non inclusi)'
+              }
+              value={price.breakdown.commonAreas}
+              dashed={!state.priceFlags.commonAreasDecided}
+            />
+
+            <div
+              style={{ height: 1, background: '#e5e7eb', margin: '8px 0' }}
+            />
+
+            {price.isComplete ? (
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  fontWeight: 900,
+                }}
+              >
+                <div>Totale / mese</div>
+                <div>{eur(price.totalMonthly)}</div>
+              </div>
+            ) : (
+              <Small>
+                Completa “Spese”, “Pulizie” e “Spazi comuni” per vedere il
+                totale finale.
+              </Small>
+            )}
+          </div>
+
+          <div style={{ marginTop: 10 }}>
+            <Small>
+              Nota: le immagini (piantine) compariranno quando aggiungerai i
+              file in <b>public/plans</b>.
+            </Small>
+          </div>
+        </Box>
+      </div>
+    </div>
+  );
+}
+
+const inpStyle: React.CSSProperties = {
+  width: '100%',
+  borderRadius: 14,
+  border: '1px solid #e5e7eb',
+  padding: '10px 12px',
+  outline: 'none',
+  background: 'white',
+};
